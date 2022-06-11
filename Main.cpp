@@ -218,8 +218,8 @@ void readOpts(int argc, TCHAR* argv[])
 			printf("\ndirwatch_cli: \n");
 			printf("\t -save <dir>         save changed files to dir. Can create, parent path must exist\n");
 			printf("\t -watch <dir>        a directory to watch, always recursive, must exist, default c:\\\n");
-			printf("\t -ex <path/pattern>  exclude a path/fragment or pattern (supports: *?[])\n");
-			printf("\t -exf <path>         added excludes from <path>\n");
+			printf("\t -ex <path/pattern>  exclude a path/fragment or pattern (from sqllite supports: *?[])\n");
+			printf("\t -exf <path>         added excludes from <file path>\n");
 			printf("\t -si                 show ignored paths in output\n");
 			printf("\t -log                manually specify log file (does not require -save)\n");
 			printf("\t -h -? -help         this help screen. Note switches support / or - prefix.\n");
@@ -751,6 +751,11 @@ int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
 				else
 				{
 					changes.Pop(dwAction, wstrFilename);
+
+					if (logFile.GetLength() > 0 && wstrFilename == logFile) {
+						ignoreIt = true;
+						if (showIgnored) mprintf(L"** IGNORED: LogFile %ls %ls\n", ExplainAction(dwAction), (LPCWSTR)wstrFilename);
+					}
 
 					if (saveDir.GetLength() > 0 && wstrFilename.Left(saveDir.GetLength()) == saveDir) { //safe if getlength > path.length
 						ignoreIt = true;
