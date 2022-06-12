@@ -177,16 +177,23 @@ void parseExcludeFile(CStringW path) {
 
 	int size = file_length(fp);
 	char* buf = (char*)malloc(size + 10);
+	
+	if (buf == NULL) {
+		printf("malloc failed for %d bytes\n", size);
+		exit(0);
+	}
+
 	memset(buf, 0x00, size + 10);
 	fread(buf, 1, size, fp);
 	fclose(fp);
 
 	string ex = buf;
 	vector<string> vs = split(ex, "\n");
+	free(buf);
 
 	for (std::vector<string>::iterator si = vs.begin(); si != vs.end(); ++si) {
 		string s = *si;
-		s = trim(s, " \r");
+		s = trim(s);
 		if (s.length() > 0) {
 			CStringW cs(s.c_str(), s.length());
 			if (cs.FindOneOf(L"*?[") >= 0) {
@@ -346,7 +353,9 @@ void readOpts(int argc, TCHAR* argv[])
 
 }
 
-//---------------------LIKE------------------------------
+//---------------------LIKE (ripped from sqllite)------------------------------
+//https://stackoverflow.com/questions/22099599/sql-like-similar-use-in-c
+//I did a half ass conversion to accept wchar seems to work ok on ansi wchar anyway..
 /*
 ** This lookup table is used to help decode the first byte of
 ** a multi-byte UTF8 character.
@@ -361,8 +370,6 @@ static const unsigned char sqlite3Utf8Trans1[] = {
 	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
 	0x00, 0x01, 0x02, 0x03, 0x00, 0x01, 0x00, 0x00,
 };
-
-
 
 typedef  unsigned int u32;
 typedef  wchar_t u8;
@@ -400,7 +407,6 @@ u32 sqlite3Utf8Read(
     }                                                    \
 }
 
-
 const unsigned char sqlite3UpperToLower[] = {
 	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
 	18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
@@ -419,9 +425,7 @@ const unsigned char sqlite3UpperToLower[] = {
 	252, 253, 254, 255
 };
 
-
 # define GlobUpperToLower(A)   if( !((A)&~0x7f) ){ A = sqlite3UpperToLower[A]; }
-
 
 /*
 ** Compare two UTF-8 strings for equality where the first string can
@@ -732,6 +736,7 @@ int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
 	{
 		ignoreIt = false;
 		DWORD rc = ::WaitForMultipleObjectsEx(_countof(handles), handles, false, INFINITE, true);
+
 		switch (rc)
 		{
 		case WAIT_OBJECT_0 + 0:
@@ -757,12 +762,12 @@ int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
 						if (showIgnored) mprintf(L"** IGNORED: LogFile %ls %ls\n", ExplainAction(dwAction), (LPCWSTR)wstrFilename);
 					}
 
-					if (saveDir.GetLength() > 0 && wstrFilename.Left(saveDir.GetLength()) == saveDir) { //safe if getlength > path.length
+					if (!ignoreIt && saveDir.GetLength() > 0 && wstrFilename.Left(saveDir.GetLength()) == saveDir) { //safe if getlength > path.length
 						ignoreIt = true;
 						if (showIgnored) mprintf(L"** IGNORED: SaveDir %ls %ls\n", ExplainAction(dwAction), (LPCWSTR)wstrFilename);
 					}
 
-					if (!exclude.empty()) {
+					if (!ignoreIt && !exclude.empty()) {
 						for (csi = exclude.begin(); csi != exclude.end(); ++csi) {
 							if (wstrFilename.Find(*csi) >= 0) {
 								ignoreIt = true;
@@ -772,7 +777,7 @@ int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
 						}
 					}
 
-					if (!exclude_pattern.empty()) {
+					if (!ignoreIt && !exclude_pattern.empty()) {
 						for (csi = exclude_pattern.begin(); csi != exclude_pattern.end(); ++csi) {
 							if (patternCompare((u8*)(LPCWSTR)*csi, (u8*)(LPCWSTR)wstrFilename) != 0){
 								ignoreIt = true;
