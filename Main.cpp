@@ -61,6 +61,7 @@ vector<CStringW> exclude_pattern;
 
 FILE* hLog = 0;
 bool showIgnored = false;
+bool bTerminate = false;
 unsigned int dirCount = 0, captures=0, events=0;
 const DWORD dwNotificationFlags = FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION | FILE_NOTIFY_CHANGE_FILE_NAME;
 
@@ -164,6 +165,20 @@ inline std::string& trim(std::string& s, const char* t = stripChars)
 	return ltrim(rtrim(s, t), t);
 }
 
+CStringW expandEnv(TCHAR* arg) {
+	CStringW tmp;
+	TCHAR buf[2000]; //should never be longer than this I dont want to malloc..
+	DWORD sz = ExpandEnvironmentStringsW(arg, buf, 2000);
+
+	if (sz == 0 || sz >= 2000) {
+		tmp = arg;
+		return tmp;
+	}
+
+	tmp = buf;
+	return tmp;
+}
+
 void parseExcludeFile(CStringW path) {
 
 	FILE* fp;
@@ -195,7 +210,8 @@ void parseExcludeFile(CStringW path) {
 		string s = *si;
 		s = trim(s);
 		if (s.length() > 0) {
-			CStringW cs(s.c_str(), s.length());
+			//CStringW cs(s.c_str(), s.length());
+			CStringW cs = expandEnv((TCHAR*)s.c_str());
 			if (cs.FindOneOf(L"*?[") >= 0) {
 				exclude_pattern.push_back(cs);
 				printf("Exclusion Pattern added: %ls\n", (LPCWSTR)cs);
@@ -229,9 +245,10 @@ void readOpts(int argc, TCHAR* argv[])
 			printf("\t -exf <path>         added excludes from <file path>\n");
 			printf("\t -si                 show ignored paths in output\n");
 			printf("\t -log                manually specify log file (does not require -save)\n");
-			printf("\t -h -? -help         this help screen. Note switches support / or - prefix.\n");
-			printf("\t Auto saves log<date>.txt to save dir if specified.");
-			printf("\t Based on ReadDirectoryChangesW sample from James E Beveridge Copyright (c) 2010\n\n");
+			printf("\t -h -? -help         this help screen. Note switches support / or - prefix.\n\n");
+			printf("\t Auto saves log<date>.txt to -save dir if set and no -log override.\n");
+			printf("\t All args expand env vars (%cd% is current dir)\n");
+			printf("\t Based on sample by James E Beveridge (c) 2010\n\n");
 			exit(0);
 		}
 	}
@@ -249,7 +266,7 @@ void readOpts(int argc, TCHAR* argv[])
 			else {
 				if (hLog != 0) fclose(hLog);
 				if (!logFile.IsEmpty() && PathFileExists((LPCWSTR)logFile)) remove((const char*)(LPCWSTR)logFile);
-				logFile = argv[i + 1];
+				logFile = expandEnv(argv[i + 1]);
 				CT2A ascii(logFile);
 				hLog = fopen(ascii.m_psz, "w");
 				if (hLog != NULL) {
@@ -274,7 +291,7 @@ void readOpts(int argc, TCHAR* argv[])
 				exit(0);
 			}
 
-			saveDir = argv[i+1];
+			saveDir = expandEnv(argv[i+1]);
 			if (!fs::is_directory((LPCWSTR)saveDir)) {
 				if (!fs::create_directory((LPCWSTR)saveDir)) {
 					printf("Could not create -save dirtectory: %ls\n", (LPCWSTR)saveDir);
@@ -306,15 +323,16 @@ void readOpts(int argc, TCHAR* argv[])
 				printf("-watch missing path argument\n");
 				exit(0);
 			}
-			if (!fs::is_directory(argv[i + 1])){
-					printf("-watch dirtectory not found: %ls\n", argv[i + 1]);
+			CStringW wd = expandEnv(argv[i + 1]);
+			if (!fs::is_directory((LPCWSTR)wd)){
+					printf("-watch dirtectory not found: %ls\n", (LPCWSTR)wd);
 					exit(0);
 			}
 			else {
 				//todo: read a -r for recursive, for now always recursive...
 				dirCount++;
-				changes.AddDirectory(argv[i + 1], true, dwNotificationFlags);
-				printf("Watching %ls\n", argv[i + 1]);
+				changes.AddDirectory((LPCWSTR)wd, true, dwNotificationFlags);
+				printf("Watching %ls\n", (LPCWSTR)wd);
 				
 			}
 		}
@@ -325,14 +343,14 @@ void readOpts(int argc, TCHAR* argv[])
 				exit(0);
 			}
 			else {
-				cs = argv[i + 1];
+				cs = expandEnv(argv[i + 1]);
 				if (cs.FindOneOf(L"*?[") >= 0) {
 					exclude_pattern.push_back(cs);
-					printf("Exclusion Pattern added: %ls\n", argv[i + 1]);
+					printf("Exclusion Pattern added: %ls\n", (LPCWSTR)cs);
 				}
 				else {
 					exclude.push_back(cs);
-					printf("Exclusion added: %ls\n", argv[i + 1]);
+					printf("Exclusion added: %ls\n", (LPCWSTR)cs);
 				}
 
 			}
@@ -344,7 +362,7 @@ void readOpts(int argc, TCHAR* argv[])
 				exit(0);
 			}
 			else {
-				cs = argv[i + 1];
+				cs = expandEnv(argv[i + 1]);
 				parseExcludeFile(cs);
 			}
 		}
@@ -709,6 +727,15 @@ bool SafeSaveFile(CStringW existing) {
 }
 
 
+int __stdcall ctrl_c_handler(DWORD arg) {
+	if (arg == 0) { //ctrl_c event
+		bTerminate = true;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+
 int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
 {
 	
@@ -728,9 +755,11 @@ int _tmain(int argc, TCHAR* argv[], TCHAR* envp[])
 
 	int p = 0;
 	char buf[MAX_PATH];
-	bool bTerminate = false;
 	bool ignoreIt = false;
 	std::vector<CStringW>::iterator csi;
+
+	setvbuf(stdout, NULL, _IONBF, 0); //autoflush - allows external apps to read cmdline output in realtime..
+	SetConsoleCtrlHandler(ctrl_c_handler, TRUE); //http://msdn.microsoft.com/en-us/library/ms686016
 
 	while (!bTerminate)
 	{
